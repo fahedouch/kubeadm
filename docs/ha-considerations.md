@@ -39,7 +39,7 @@ This combination can be run either as services on the operating system or as sta
 
 The `keepalived` configuration consists of two files: the service configuration file and a health check script which will be called periodically to verify that the node holding the virtual IP is still operational.
 
-The files are assumed to reside in a `/etc/keepalived` directory. Note that however some Linux distributions may keep them elsewhere. The following configuration has been successfully used with `keepalived` version 1.3.5:
+The files are assumed to reside in a `/etc/keepalived` directory. Note that however some Linux distributions may keep them elsewhere. The following configuration has been successfully used with `keepalived` version 2.0.17:
 
 ```bash
 ! /etc/keepalived/keepalived.conf
@@ -77,7 +77,7 @@ There are some placeholders in `bash` variable style to fill in:
 - `${STATE}` is `MASTER` for one and `BACKUP` for all other hosts, hence the virtual IP will initially be assigned to the `MASTER`.
 - `${INTERFACE}` is the network interface taking part in the negotiation of the virtual IP, e.g. `eth0`.
 - `${ROUTER_ID}` should be the same for all `keepalived` cluster hosts while unique amongst all clusters in the same subnet. Many distros pre-configure its value to `51`.
-- `${PRIORITY}` should be higher on the master than on the backups. Hence `101` and `100` respectively will suffice.
+- `${PRIORITY}` should be higher on the control plane node than on the backups. Hence `101` and `100` respectively will suffice.
 - `${AUTH_PASS}` should be the same for all `keepalived` cluster hosts, e.g. `42`
 - `${APISERVER_VIP}` is the virtual IP address negotiated between the `keepalived` cluster hosts.
 
@@ -137,7 +137,7 @@ defaults
     timeout check           10s
 
 #---------------------------------------------------------------------
-# apiserver frontend which proxys to the masters
+# apiserver frontend which proxys to the control plane nodes
 #---------------------------------------------------------------------
 frontend apiserver
     bind *:${APISERVER_DEST_PORT}
@@ -191,7 +191,7 @@ metadata:
   namespace: kube-system
 spec:
   containers:
-  - image: osixia/keepalived:1.3.5-1
+  - image: osixia/keepalived:2.0.17
     name: keepalived
     resources: {}
     securityContext:
@@ -255,7 +255,7 @@ With the services up, now the Kubernetes cluster can be bootstrapped using `kube
 
 ## kube-vip
 
-As an alternative to the more "traditional" approach of `keepalived` and `haproxy`, [kube-vip](https://plndr.io/kube-vip/) implements both management of a virtual IP and load balancing in one service. Similar to option 2 above, `kube-vip` will be run as a static pod on the control plane nodes.
+As an alternative to the more "traditional" approach of `keepalived` and `haproxy`, [kube-vip](https://kube-vip.io/) implements both management of a virtual IP and load balancing in one service. Similar to option 2 above, `kube-vip` will be run as a static pod on the control plane nodes.
 
 Like with `keepalived`, the hosts negotiating a virtual IP need to be in the same IP subnet. Similarly, like with `haproxy`, stream-based load-balancing allows TLS termination to be handled by the API Server instances behind it.
 

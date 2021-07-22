@@ -51,12 +51,11 @@ _Actions on a running cluster:_
     - generate kubeadm config and generate load balancer config can be invoked also after `kinder create`
     - generate kubeadm config supports:
         - automatic configuration for external etcd/external lb, if present
-        - shortcut for using kube-dns instead of CoreDNS
         - shortcut for setting certificateKey field (for testing the automatic copy certs feature of kubeadm)
         - shortcut for testing different kubeadm join discovery mechanics
     - `kubeadm init` can be executed as a unique workflow or using phases
     - `kubeadm join` can be executed as a unique workflow or using phases
-    - the init action installs Calico as a CNI plugin instead of kindnet
+    - the init action installs kindnet CNI plugin in a custom workflow defined by kinder. kubeadm should be CNI agnostic and that validation of other CNI providers is out of the scope of our current E2E testing.
     - the init/join actions can use the automatic copy certs feature of kubeadm (or mimic the manual copy process)
 - kinder support additional actions
     - upgrade
@@ -80,18 +79,10 @@ kind packages that are not intended for public usage, but this was agreed with t
 new use cases, share lessons learned, issues and solutions, and ultimately contribute
 back new features.
 
-- "sigs.k8s.io/kind/cmd/*" for
+- "sigs.k8s.io/kind/pkg/cmd"
+- "sigs.k8s.io/kind/pkg/cmd/kind/delete"
+- "sigs.k8s.io/kind/pkg/cmd/kind/export"
     - providing access to few kind commands useful for the use cases targeted by kinder
-- "sigs.k8s.io/kind/pkg/build/base" for
-    - building a containerd base image
-- "sigs.k8s.io/kind/pkg/cluster/constants" for
-    - constants
-- "sigs.k8s.io/kind/pkg/container/docker" for
-    - `EditArchiveRepositories`
-    - `PullIfNotPresent`
-    - `Run`
-    - `UsernsRemap`
-    - `Kill`
 - "sigs.k8s.io/kind/pkg/fs" (*) for
     - `TempDir`
     - `Copy`

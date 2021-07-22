@@ -30,14 +30,14 @@ import (
 
 	"github.com/pkg/errors"
 
+	"k8s.io/kubeadm/kinder/pkg/cluster/manager/actions/assets"
 	"k8s.io/kubeadm/kinder/pkg/cluster/status"
 	"k8s.io/kubeadm/kinder/pkg/constants"
-	"k8s.io/kubeadm/kinder/pkg/data"
 )
 
 // KubeadmInit executes the kubeadm init workflow including also post init task
 // like installing the CNI network plugin
-func KubeadmInit(c *status.Cluster, usePhases, kubeDNS bool, copyCertsMode CopyCertsMode, patchesDir, ignorePreflightErrors string, wait time.Duration, vLevel int) (err error) {
+func KubeadmInit(c *status.Cluster, usePhases bool, copyCertsMode CopyCertsMode, kubeadmConfigVersion, patchesDir, ignorePreflightErrors, featureGates string, wait time.Duration, vLevel int) (err error) {
 	cp1 := c.BootstrapControlPlane()
 
 	// if patcheDir is defined, copy the patches to the node
@@ -61,7 +61,7 @@ func KubeadmInit(c *status.Cluster, usePhases, kubeDNS bool, copyCertsMode CopyC
 	}
 
 	// prepares the kubeadm config on this node
-	if err := KubeadmInitConfig(c, kubeDNS, copyCertsMode, cp1); err != nil {
+	if err := KubeadmInitConfig(c, kubeadmConfigVersion, copyCertsMode, featureGates, cp1); err != nil {
 		return err
 	}
 
@@ -219,28 +219,11 @@ func postInit(c *status.Cluster, wait time.Duration) error {
 		return err
 	}
 
-	// Calico requires net.ipv4.conf.all.rp_filter to be set to 0 or 1.
-	// If you require loose RPF and you are not concerned about spoofing, this check can be disabled by setting the IgnoreLooseRPF configuration parameter to 'true'.
-	for _, cp := range c.K8sNodes() {
-		if err := cp.Command(
-			"sysctl", "-w", "net.ipv4.conf.all.rp_filter=1",
-		).Silent().Run(); err != nil {
-			return err
-		}
-	}
-
 	// Apply a CNI plugin using a hardcoded manifest
 	cmd := cp1.Command("kubectl", "apply", "--kubeconfig=/etc/kubernetes/admin.conf", "-f", "-")
-	cp1.Infof("applying Calico version 3.8.2")
-	cmd.Stdin(strings.NewReader(data.CalicoCNI3_8_2))
+	cp1.Infof("applying kindnet version 0.5.4")
+	cmd.Stdin(strings.NewReader(assets.KindnetManifest054))
 	if err := cmd.RunWithEcho(); err != nil {
-		return err
-	}
-
-	// Fix calico as per https://alexbrand.dev/post/creating-a-kind-cluster-with-calico-networking/
-	if err := cp1.Command(
-		"kubectl", "--kubeconfig=/etc/kubernetes/admin.conf", "-n=kube-system", "set", "env", "daemonset/calico-node", "FELIX_IGNORELOOSERPF=true",
-	).RunWithEcho(); err != nil {
 		return err
 	}
 

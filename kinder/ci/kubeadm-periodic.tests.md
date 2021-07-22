@@ -25,6 +25,15 @@ Kubeadm tests span across 5 Kubernetes versions:
 Note that some tests do not span the full support skew, because they could be testing a feature that was added later
 than the oldest supported version.
 
+## Modifying e2e tests
+
+The contents of `kinder/ci/workflows` and the test-infra Prow jobs are generated
+by the `kinder/ci/tool/update-workflows` tool. To modify/add/remove the kinder workflows and/or
+test-infra Jobs you must modify their templates in `kinder/ci/tool/update-workflows/templates`.
+
+See [Managing e2e tests](../../docs/managing-e2e-tests.md) to understand more about the e2e test
+setup.
+
 ## Type of tests
 
 Kubeadm tests can be grouped in different families of tests, each one covering a different type of test workflow. Each test workflow
@@ -53,9 +62,21 @@ Workflow file names: [`upgrade-latest-no-addon-config-maps.yaml`](./workflows)
 
 ### X on Y tests
 
-X on Y tests are meant to verify the proper functioning of kubeadm version X with Kubernetes Y = X-1/minor. Following X on Y tests are implemented:
+X on Y tests are meant to verify the proper functioning of kubeadm version X with Kubernetes Y = X-1/minor.
 
-Workflow file names: [`skew-*`](./workflows)
+Workflow file names: [`skew-[x]-on-[y]`](./workflows)
+
+### kubelet X on Y tests
+
+Kubelet X on Y tests are meant to verify the proper functioning of a version X kubelet against version Y (X+1 or X+2)
+kubeadm and control plane. The coverage of X == Y is already covered by the `regular-*` tests.
+
+Note that for the time being kubeadm version X does not support skew against a kubelet version X-2,
+similarly to how kubeadm does not support X-2 skew with the control plane. This requires skipping
+the `KubeletVersion` preflight check. In the future if these X-2 tests are no longer possible with kubeadm
+they would have to be adapted on the kinder side or dropped.
+
+Workflow file names: [`skew-kubelet-[x]-on-[y]`](./workflows)
 
 ### External etcd with secret copy tests
 

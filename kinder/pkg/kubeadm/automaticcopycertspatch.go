@@ -22,21 +22,14 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	K8sVersion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/kubeadm/kinder/pkg/constants"
 )
 
 // GetAutomaticCopyCertsPatches returns the kubeadm config patch that will instruct kubeadm
 // to use a well known certificate key for init/join.
-func GetAutomaticCopyCertsPatches(kubeadmVersion *K8sVersion.Version) ([]string, error) {
-	// gets the config version corresponding to a kubeadm version
-	kubeadmConfigVersion, err := getKubeadmConfigVersion(kubeadmVersion)
-	if err != nil {
-		return nil, err
-	}
-
+func GetAutomaticCopyCertsPatches(kubeadmConfigVersion string) ([]string, error) {
 	// select the patches for the kubeadm config version
-	log.Debugf("Preparing automaticCopyCertsPatches for kubeadm config %s (kubeadm version %s)", kubeadmConfigVersion, kubeadmVersion)
+	log.Debugf("Preparing automaticCopyCertsPatches for kubeadm config %s", kubeadmConfigVersion)
 
 	switch kubeadmConfigVersion {
 	case "v1beta2":
@@ -44,10 +37,11 @@ func GetAutomaticCopyCertsPatches(kubeadmVersion *K8sVersion.Version) ([]string,
 			fmt.Sprintf(automaticCopyCertsInitv1beta2, constants.CertificateKey),
 			fmt.Sprintf(automaticCopyCertsJoinv1beta2, constants.CertificateKey),
 		}, nil
-	case "v1beta1":
-		// no-op: certificate key was not supported in those release of the kubeadm config API;
-		// the --certificate-key flag should be used instead
-		return []string{}, nil
+	case "v1beta3":
+		return []string{
+			fmt.Sprintf(automaticCopyCertsInitv1beta3, constants.CertificateKey),
+			fmt.Sprintf(automaticCopyCertsJoinv1beta3, constants.CertificateKey),
+		}, nil
 	}
 
 	return nil, errors.Errorf("unknown kubeadm config version: %s", kubeadmConfigVersion)
@@ -60,6 +54,19 @@ metadata:
 certificateKey: "%s"`
 
 const automaticCopyCertsJoinv1beta2 = `apiVersion: kubeadm.k8s.io/v1beta2
+kind: JoinConfiguration
+metadata:
+  name: config
+controlPlane:
+  certificateKey: "%s"`
+
+const automaticCopyCertsInitv1beta3 = `apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+metadata:
+  name: config
+certificateKey: "%s"`
+
+const automaticCopyCertsJoinv1beta3 = `apiVersion: kubeadm.k8s.io/v1beta3
 kind: JoinConfiguration
 metadata:
   name: config

@@ -26,13 +26,13 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubeadm/kinder/pkg/cluster/status"
 	"k8s.io/kubeadm/kinder/pkg/constants"
-	"k8s.io/kubeadm/kinder/pkg/cri"
+	"k8s.io/kubeadm/kinder/pkg/cri/nodes"
 	"k8s.io/kubeadm/kinder/pkg/kubeadm"
 )
 
 // kubeadmConfigOptionsall stores all the kinder flags that impact on the kubeadm config generation
 type kubeadmConfigOptions struct {
-	kubeDNS       bool
+	configVersion string
 	copyCertsMode CopyCertsMode
 	discoveryMode DiscoveryMode
 }
@@ -40,23 +40,23 @@ type kubeadmConfigOptions struct {
 // KubeadmInitConfig action writes the InitConfiguration into /kind/kubeadm.conf file on all the K8s nodes in the cluster.
 // Please note that this action is automatically executed at create time, but it is possible
 // to invoke it separately as well.
-func KubeadmInitConfig(c *status.Cluster, kubeDNS bool, copyCertsMode CopyCertsMode, nodes ...*status.Node) error {
+func KubeadmInitConfig(c *status.Cluster, kubeadmConfigVersion string, copyCertsMode CopyCertsMode, featureGate string, nodes ...*status.Node) error {
 	// defaults everything not relevant for the Init Config
-	return KubeadmConfig(c, kubeDNS, copyCertsMode, TokenDiscovery, nodes...)
+	return KubeadmConfig(c, kubeadmConfigVersion, copyCertsMode, TokenDiscovery, featureGate, nodes...)
 }
 
 // KubeadmJoinConfig action writes the JoinConfiguration into /kind/kubeadm.conf file on all the K8s nodes in the cluster.
 // Please note that this action is automatically executed at create time, but it is possible
 // to invoke it separately as well.
-func KubeadmJoinConfig(c *status.Cluster, copyCertsMode CopyCertsMode, discoveryMode DiscoveryMode, nodes ...*status.Node) error {
+func KubeadmJoinConfig(c *status.Cluster, kubeadmConfigVersion string, copyCertsMode CopyCertsMode, discoveryMode DiscoveryMode, nodes ...*status.Node) error {
 	// defaults everything not relevant for the join Config
-	return KubeadmConfig(c, false, copyCertsMode, discoveryMode, nodes...)
+	return KubeadmConfig(c, kubeadmConfigVersion, copyCertsMode, discoveryMode, "" /* feature-gates */, nodes...)
 }
 
 // KubeadmConfig action writes the /kind/kubeadm.conf file on all the K8s nodes in the cluster.
 // Please note that this action is automatically executed at create time, but it is possible
 // to invoke it separately as well.
-func KubeadmConfig(c *status.Cluster, kubeDNS bool, copyCertsMode CopyCertsMode, discoveryMode DiscoveryMode, nodes ...*status.Node) error {
+func KubeadmConfig(c *status.Cluster, kubeadmConfigVersion string, copyCertsMode CopyCertsMode, discoveryMode DiscoveryMode, featureGate string, nodes ...*status.Node) error {
 	cp1 := c.BootstrapControlPlane()
 
 	// get installed kubernetes version from the node image
@@ -84,6 +84,24 @@ func KubeadmConfig(c *status.Cluster, kubeDNS bool, copyCertsMode CopyCertsMode,
 		controlPlaneEndpoint = controlPlaneEndpointIPv6
 	}
 
+	featureGateName := ""
+	featureGateValue := ""
+	// We remove the leading and trailing double or single quotes because the
+	// feature-gate could be set as
+	// --kubeadm-feature-gate="RootlessControlPlane=true" or
+	// --kubeadm-feature-gate='RootlessControlPlane=true', so the value
+	// of featureGate string would be "\"RootlessControlPlane=true"\" or "RootlessControlPlane=true'" respectively.
+	// Once we trim the value double or single quotes the value will be "RootlessControlPlane=true".
+	trimmedFeatureGate := strings.Trim(featureGate, "\"'")
+	if len(trimmedFeatureGate) > 0 {
+		split := strings.Split(trimmedFeatureGate, "=")
+		if len(split) != 2 {
+			return errors.New("feature gate must be formatted as 'key=value'")
+		}
+		featureGateName = split[0]
+		featureGateValue = split[1]
+	}
+
 	// create configData with all the configurations supported by the kubeadm config template implemented in kind
 	configData := kubeadm.ConfigData{
 		ClusterName:          c.Name(),
@@ -92,15 +110,16 @@ func KubeadmConfig(c *status.Cluster, kubeDNS bool, copyCertsMode CopyCertsMode,
 		APIBindPort:          constants.APIServerPort,
 		APIServerAddress:     controlPlaneIP,
 		Token:                constants.Token,
-		PodSubnet:            "192.168.0.0/16", // default for calico
-		ServiceSubnet:        "",               // let kubeadm apply default
+		PodSubnet:            "192.168.0.0/16", // default for kindnet
 		ControlPlane:         true,
 		IPv6:                 c.Settings.IPFamily == status.IPv6Family,
+		FeatureGateName:      featureGateName,
+		FeatureGateValue:     featureGateValue,
 	}
 
 	// create configOptions with all the kinder flags that impact on the kubeadm config generation
 	configOptions := kubeadmConfigOptions{
-		kubeDNS:       kubeDNS,
+		configVersion: kubeadmConfigVersion,
 		copyCertsMode: copyCertsMode,
 		discoveryMode: discoveryMode,
 	}
@@ -182,9 +201,16 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 	if err != nil {
 		return "", err
 	}
+	log.Debugf("kubeadm version %s", kubeadmVersion)
+
+	kubeadmConfigVersion := options.configVersion
+	if len(kubeadmConfigVersion) == 0 {
+		kubeadmConfigVersion = kubeadm.GetKubeadmConfigVersion(kubeadmVersion)
+	}
+	log.Debugf("using kubeadm config version %s", kubeadmConfigVersion)
 
 	// generate the "raw config", using the kubeadm config template provided by kind
-	rawconfig, err := kubeadm.Config(kubeadmVersion, data)
+	rawconfig, err := kubeadm.Config(kubeadmConfigVersion, data)
 	if err != nil {
 		return "", err
 	}
@@ -202,12 +228,12 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 		return "", err
 	}
 
-	criConfigHelper, err := cri.NewConfigHelper(nodeCRI)
+	criConfigHelper, err := nodes.NewConfigHelper(nodeCRI)
 	if err != nil {
 		return "", err
 	}
 
-	criPatches, err := criConfigHelper.GetKubeadmConfigPatches(kubeadmVersion, data.ControlPlane)
+	criPatches, err := criConfigHelper.GetKubeadmConfigPatches(kubeadmConfigVersion, data.ControlPlane)
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +245,7 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 	// NB. this is a no-op in case of kubeadm config API older than v1beta2, because
 	// this feature was not supported before (the --certificate-key flag should be used instead)
 	if options.copyCertsMode == CopyCertsModeAuto && n.IsControlPlane() {
-		automaticCopyCertsPatches, err := kubeadm.GetAutomaticCopyCertsPatches(kubeadmVersion)
+		automaticCopyCertsPatches, err := kubeadm.GetAutomaticCopyCertsPatches(kubeadmConfigVersion)
 		if err != nil {
 			return "", err
 		}
@@ -227,19 +253,10 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 		patches = append(patches, automaticCopyCertsPatches...)
 	}
 
-	// if requested, add patches for using kube-dns addon instead of coreDNS
-	if options.kubeDNS {
-		kubeDNSPatch, err := kubeadm.GetKubeDNSPatch(kubeadmVersion)
-		if err != nil {
-			return "", err
-		}
-		patches = append(patches, kubeDNSPatch)
-	}
-
 	// if requested to use file discovery and not the first control-plane, add patches for using file discovery
 	if options.discoveryMode != TokenDiscovery && !(n == c.BootstrapControlPlane()) {
 		// remove token from config
-		removeTokenPatch, err := kubeadm.GetRemoveTokenPatch(kubeadmVersion)
+		removeTokenPatch, err := kubeadm.GetRemoveTokenPatch(kubeadmConfigVersion)
 		if err != nil {
 			return "", err
 		}
@@ -253,7 +270,7 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 		}
 
 		// add discovery file path to the config
-		fileDiscoveryPatch, err := kubeadm.GetFileDiscoveryPatch(kubeadmVersion)
+		fileDiscoveryPatch, err := kubeadm.GetFileDiscoveryPatch(kubeadmConfigVersion)
 		if err != nil {
 			return "", err
 		}
@@ -261,7 +278,7 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 
 		// if the file discovery does not contains the authorization credentials, add tls discovery token
 		if options.discoveryMode == FileDiscoveryWithoutCredentials {
-			tlsBootstrapPatch, err := kubeadm.GetTLSBootstrapPatch(kubeadmVersion)
+			tlsBootstrapPatch, err := kubeadm.GetTLSBootstrapPatch(kubeadmConfigVersion)
 			if err != nil {
 				return "", err
 			}
@@ -282,7 +299,7 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 			externalEtcdIP = externalEtcdIPV6
 		}
 
-		externalEtcdPatch, err := kubeadm.GetExternalEtcdPatch(kubeadmVersion, externalEtcdIP)
+		externalEtcdPatch, err := kubeadm.GetExternalEtcdPatch(kubeadmConfigVersion, externalEtcdIP)
 		if err != nil {
 			return "", err
 		}
@@ -290,18 +307,11 @@ func getKubeadmConfig(c *status.Cluster, n *status.Node, data kubeadm.ConfigData
 		patches = append(patches, externalEtcdPatch)
 	}
 
-	// fix all the patches to have name metadata matching the generated config
-	patches, jsonPatches = setPatchNames(patches, jsonPatches)
-
 	// apply patches
-	patched, err := kubeadm.Build([]string{rawconfig}, patches, jsonPatches)
+	patched, err := kubeadm.Build(rawconfig, patches, jsonPatches)
 	if err != nil {
 		return "", err
 	}
-
-	// remove metadata info from the kubeadm config template provided by kind;
-	// those info are not part of the kubeadm config API, but are necessary for Kustomize to work
-	patched = removeMetadata(patched)
 
 	// Select the objects that are relevant for a specific node;
 	// if the node is the bootstrap control plane, then all the objects used as init time
@@ -387,42 +397,6 @@ func createDiscoveryFile(c *status.Cluster, n *status.Node, discoveryMode Discov
 	log.Debugf("generated discovery file:\n%s", string(configBytes))
 
 	return nil
-}
-
-// objectName is the name every generated object will have
-// I.E. `metadata:\nname: config`
-const objectName = "config"
-
-// setPatchNames sets the targeted object name on every patch to be the fixed
-// name we use when generating config objects (we have one of each type, all of
-// which have the same fixed name)
-func setPatchNames(patches []string, jsonPatches []kubeadm.PatchJSON6902) ([]string, []kubeadm.PatchJSON6902) {
-	fixedPatches := make([]string, len(patches))
-	fixedJSONPatches := make([]kubeadm.PatchJSON6902, len(jsonPatches))
-	for i, patch := range patches {
-		// insert the generated name metadata
-		fixedPatches[i] = fmt.Sprintf("metadata:\nname: %s\n%s", objectName, patch)
-	}
-	for i, patch := range jsonPatches {
-		// insert the generated name metadata
-		patch.Name = objectName
-		fixedJSONPatches[i] = patch
-	}
-	return fixedPatches, fixedJSONPatches
-}
-
-// removeMetadata trims out the metadata.name we put in the config for kustomize matching,
-// kubeadm will complain about this otherwise
-func removeMetadata(kustomized string) string {
-	lines := strings.Split(kustomized, "\n")
-	out := []string{}
-	for _, l := range lines {
-		if strings.Contains(l, "metadata:") || (strings.Contains(l, "name:") && strings.Contains(l, "config")) {
-			continue
-		}
-		out = append(out, l)
-	}
-	return strings.Join(out, "\n")
 }
 
 const yamlSeparator = "---\n"

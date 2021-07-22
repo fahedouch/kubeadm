@@ -22,29 +22,22 @@ import (
 	"github.com/pkg/errors"
 
 	log "github.com/sirupsen/logrus"
-	K8sVersion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/kubeadm/kinder/pkg/constants"
 )
 
 // GetRemoveTokenPatch returns the kubeadm config patch that will instruct kubeadm
 // to not uses token discovery.
-func GetRemoveTokenPatch(kubeadmVersion *K8sVersion.Version) (PatchJSON6902, error) {
-	// gets the config version corresponding to a kubeadm version
-	kubeadmConfigVersion, err := getKubeadmConfigVersion(kubeadmVersion)
-	if err != nil {
-		return PatchJSON6902{}, err
-	}
-
+func GetRemoveTokenPatch(kubeadmConfigVersion string) (PatchJSON6902, error) {
 	// select the patches for the kubeadm config version
-	log.Debugf("Preparing removeTokenPatch for kubeadm config %s (kubeadm version %s)", kubeadmConfigVersion, kubeadmVersion)
+	log.Debugf("Preparing removeTokenPatch for kubeadm config %s", kubeadmConfigVersion)
 
 	var patch string
 	kind := "JoinConfiguration"
 	switch kubeadmConfigVersion {
 	case "v1beta2":
 		patch = removeTokenPatchv1beta2
-	case "v1beta1":
-		patch = removeTokenPatchv1beta1
+	case "v1beta3":
+		patch = removeTokenPatchv1beta3
 	default:
 		return PatchJSON6902{}, errors.Errorf("unknown kubeadm config version: %s", kubeadmConfigVersion)
 	}
@@ -53,7 +46,6 @@ func GetRemoveTokenPatch(kubeadmVersion *K8sVersion.Version) (PatchJSON6902, err
 		Group:   "kubeadm.k8s.io",
 		Version: kubeadmConfigVersion,
 		Kind:    kind,
-		Name:    "config",
 		Patch:   patch,
 	}, nil
 }
@@ -62,28 +54,22 @@ const removeTokenPatchv1beta2 = `
 - op: remove
   path: "/discovery/bootstrapToken"`
 
-const removeTokenPatchv1beta1 = `
+const removeTokenPatchv1beta3 = `
 - op: remove
   path: "/discovery/bootstrapToken"`
 
 // GetFileDiscoveryPatch returns the kubeadm config patch that will instruct kubeadm
 // to use FileDiscovery.
-func GetFileDiscoveryPatch(kubeadmVersion *K8sVersion.Version) (string, error) {
-	// gets the config version corresponding to a kubeadm version
-	kubeadmConfigVersion, err := getKubeadmConfigVersion(kubeadmVersion)
-	if err != nil {
-		return "", err
-	}
-
+func GetFileDiscoveryPatch(kubeadmConfigVersion string) (string, error) {
 	// select the patches for the kubeadm config version
-	log.Debugf("Preparing fileDiscoveryPatch for kubeadm config %s (kubeadm version %s)", kubeadmConfigVersion, kubeadmVersion)
+	log.Debugf("Preparing fileDiscoveryPatch for kubeadm config %s", kubeadmConfigVersion)
 
 	var patch string
 	switch kubeadmConfigVersion {
 	case "v1beta2":
 		patch = fileDiscoveryPatchv1beta2
-	case "v1beta1":
-		patch = fileDiscoveryPatchv1beta1
+	case "v1beta3":
+		patch = fileDiscoveryPatchv1beta3
 	default:
 		return "", errors.Errorf("unknown kubeadm config version: %s", kubeadmConfigVersion)
 	}
@@ -99,7 +85,7 @@ discovery:
   file:
     kubeConfigPath: %s`
 
-const fileDiscoveryPatchv1beta1 = `apiVersion: kubeadm.k8s.io/v1beta1
+const fileDiscoveryPatchv1beta3 = `apiVersion: kubeadm.k8s.io/v1beta3
 kind: JoinConfiguration
 metadata:
   name: config
@@ -110,22 +96,16 @@ discovery:
 // GetTLSBootstrapPatch returns the kubeadm config patch that will instruct kubeadm
 // to use a TLSBootstrap token.
 // NB. for sake of semplicity, we are using the same Token already used for Token discovery
-func GetTLSBootstrapPatch(kubeadmVersion *K8sVersion.Version) (string, error) {
-	// gets the config version corresponding to a kubeadm version
-	kubeadmConfigVersion, err := getKubeadmConfigVersion(kubeadmVersion)
-	if err != nil {
-		return "", err
-	}
-
+func GetTLSBootstrapPatch(kubeadmConfigVersion string) (string, error) {
 	// select the patches for the kubeadm config version
-	log.Debugf("Preparing tlsBootstrapPatch for kubeadm config %s (kubeadm version %s)", kubeadmConfigVersion, kubeadmVersion)
+	log.Debugf("Preparing tlsBootstrapPatch for kubeadm config %s", kubeadmConfigVersion)
 
 	var patch string
 	switch kubeadmConfigVersion {
 	case "v1beta2":
 		patch = tlsBootstrapPatchv1beta2
-	case "v1beta1":
-		patch = tlsBootstrapPatchv1beta1
+	case "v1beta3":
+		patch = tlsBootstrapPatchv1beta3
 	default:
 		return "", errors.Errorf("unknown kubeadm config version: %s", kubeadmConfigVersion)
 	}
@@ -140,7 +120,7 @@ metadata:
 discovery:
   tlsBootstrapToken: %s`
 
-const tlsBootstrapPatchv1beta1 = `apiVersion: kubeadm.k8s.io/v1beta1
+const tlsBootstrapPatchv1beta3 = `apiVersion: kubeadm.k8s.io/v1beta3
 kind: JoinConfiguration
 metadata:
   name: config
